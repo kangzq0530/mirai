@@ -1,27 +1,78 @@
 package net.mamoe.mirai.data
 
-import net.mamoe.mirai.contact.ContactList
-import net.mamoe.mirai.contact.Group
-import net.mamoe.mirai.contact.Member
-import kotlin.jvm.JvmField
+import net.mamoe.mirai.Bot
+import net.mamoe.mirai.LowLevelAPI
 
 /**
- * 群资料
+ * 群资料.
+ *
+ * 通过 [Bot._lowLevelQueryGroupInfo] 得到
  */
-@Suppress("MemberVisibilityCanBePrivate") // 将来使用
-class GroupInfo(
-    @JvmField internal var _group: Group,
-    @JvmField internal var _owner: Member,
-    @JvmField internal var _name: String,
-    @JvmField internal var _announcement: String,
-    @JvmField internal var _members: ContactList<Member>
-) {
-    val group: Group get() = _group
-    val owner: Member get() = _owner
-    val name: String get() = _name
-    val announcement: String get() = _announcement
-    val members: ContactList<Member> get() = _members
+@LowLevelAPI
+interface GroupInfo {
+    /**
+     * Uin
+     */
+    val uin: Long
 
-    override fun toString(): String =
-        "GroupInfo(id=${group.id}, owner=$owner, name=$name, announcement=$announcement, members=${members.idContentString}"
+    /**
+     * 群号码
+     */ // 由 uin 计算得到
+    val groupCode: Long
+
+    /**
+     * 名称
+     */
+    val name: String // 不一定能获取到
+
+    /**
+     * 群主
+     */
+    val owner: Long // 不一定能获取到
+
+    /**
+     * 入群公告
+     */
+    val memo: String // 不一定能获取到
+
+    /**
+     * 允许群员邀请其他人加入群
+     */
+    val allowMemberInvite: Boolean
+
+    /**
+     * 允许匿名聊天
+     */
+    val allowAnonymousChat: Boolean
+
+    /**
+     * 自动审批加群请求
+     */
+    val autoApprove: Boolean
+
+    /**
+     * 坦白说开启状态
+     */
+    val confessTalk: Boolean
+
+    /**
+     * 全员禁言
+     */
+    val muteAll: Boolean
+
+    /**
+     * 机器人被禁言还剩时间, 秒.
+     */
+    val botMuteTimestamp: Int
+
+    /*
+    /**
+     * 机器人的头衔
+     */
+    val botSpecialTitle: String
+
+    /**
+     * 机器人的昵称
+     */
+    val botNameCard: String*/
 }

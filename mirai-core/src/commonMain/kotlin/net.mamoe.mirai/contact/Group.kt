@@ -1,103 +1,305 @@
-@file:Suppress("EXPERIMENTAL_API_USAGE")
+/*
+ * Copyright 2020 Mamoe Technologies and contributors.
+ *
+ * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
+ * Use of this source code is governed by the GNU AGPLv3 license that can be found through the following link.
+ *
+ * https://github.com/mamoe/mirai/blob/master/LICENSE
+ */
+
+@file:Suppress("EXPERIMENTAL_API_USAGE", "unused", "UnusedImport")
 
 package net.mamoe.mirai.contact
 
 import kotlinx.coroutines.CoroutineScope
-import net.mamoe.mirai.data.GroupInfo
-import net.mamoe.mirai.utils.coerceAtLeastOrFail
-
+import net.mamoe.mirai.Bot
+import net.mamoe.mirai.JavaFriendlyAPI
+import net.mamoe.mirai.LowLevelAPI
+import net.mamoe.mirai.data.MemberInfo
+import net.mamoe.mirai.event.events.*
+import net.mamoe.mirai.message.MessageReceipt
+import net.mamoe.mirai.message.data.Image
+import net.mamoe.mirai.message.data.Message
+import net.mamoe.mirai.message.data.isContentEmpty
+import net.mamoe.mirai.message.data.toMessage
+import net.mamoe.mirai.message.recall
+import net.mamoe.mirai.utils.*
+import net.mamoe.mirai.utils.internal.runBlocking
+import kotlin.jvm.JvmName
+import kotlin.jvm.JvmStatic
+import kotlin.jvm.JvmSynthetic
 
 /**
  * 群.
- *
- * Group ID 与 Group Number 并不是同一个值.
- * - Group Number([Group.id]) 是通常使用的群号码.(在 QQ 客户端中可见)
- * - Group ID([Group.internalId]) 是与调用 API 时使用的 id.(在 QQ 客户端中不可见)
- * @author Him188moe
  */
-interface Group : Contact, CoroutineScope/*, Map<UInt, Member>*/ { // TODO: 2019/12/4 在 inline 稳定后实现 Map<UInt, Member>. 目前这样做会导致问题
+abstract class Group : Contact(), CoroutineScope {
     /**
-     * 内部 ID. 内部 ID 为 [GroupId] 的映射
+     * 群名称.
+     *
+     * 在修改时将会异步上传至服务器, 也会广播事件 [GroupNameChangeEvent].
+     * 频繁修改可能会被服务器拒绝.
+     *
+     * @see GroupNameChangeEvent 群名片修改事件
+     * @throws PermissionDeniedException 无权限修改时将会抛出异常
      */
-    val internalId: GroupInternalId
+    abstract var name: String
 
     /**
-     * 群主 (同步事件更新)
-     * 进行 [updateGroupInfo] 时将会更新这个值.
+     * 群设置
      */
-    val owner: Member
+    abstract val settings: GroupSettings
 
     /**
-     * 群名称 (同步事件更新)
-     * 进行 [updateGroupInfo] 时将会更新这个值.
+     * 同为 groupCode, 用户看到的群号码.
      */
-    val name: String
+    abstract override val id: Long
 
     /**
-     * 入群公告, 没有时为空字符串. (同步事件更新)
-     * 进行 [updateGroupInfo] 时将会更新这个值.
+     * 群主.
+     *
+     * @return 若机器人是群主, 返回 [botAsMember]. 否则返回相应的成员
      */
-    val announcement: String
+    abstract val owner: Member
 
     /**
+     * [Bot] 在群内的 [Member] 实例
+     */
+    @MiraiExperimentalAPI
+    abstract val botAsMember: Member
+
+    /**
+     * 机器人被禁言还剩余多少秒
+     *
+     * @see BotMuteEvent 机器人被禁言事件
+     * @see isBotMuted 判断机器人是否正在被禁言
+     */
+    abstract val botMuteRemaining: Int
+
+    /**
+     * 机器人在这个群里的权限
+     *
+     * @see Group.checkBotPermission 检查 [Bot] 在这个群里的权限
+     *
+     * @see BotGroupPermissionChangeEvent 机器人群员修改
+     */
+    abstract val botPermission: MemberPermission
+
+    /**
+     * 群头像下载链接.
+     */
+    val avatarUrl: String
+        get() = "https://p.qlogo.cn/gh/$id/${id}/640"
+
+    /**
+     * 群成员列表, 不含机器人自己, 含群主.
      * 在 [Group] 实例创建的时候查询一次. 并与事件同步事件更新
-     *
-     * **注意**: 获得的列表仅为这一时刻的成员列表的镜像. 它将不会被更新
      */
-    val members: ContactList<Member>
+    abstract val members: ContactList<Member>
+
+    /**
+     * 获取群成员实例. 不存在时抛出 [kotlin.NoSuchElementException]
+     * 当 [id] 为 [Bot.id] 时返回 [botAsMember]
+     */
+    @Throws(NoSuchElementException::class)
+    abstract operator fun get(id: Long): Member
+
+    /**
+     * 获取群成员实例, 不存在则 null
+     * 当 [id] 为 [Bot.id] 时返回 [botAsMember]
+     */
+    abstract fun getOrNull(id: Long): Member?
+
+    /**
+     * 检查此 id 的群成员是否存在
+     * 当 [id] 为 [Bot.id] 时返回 `true`
+     */
+    abstract operator fun contains(id: Long): Boolean
 
 
     /**
-     * 获取群成员. 若此 ID 的成员不存在, 则会抛出 [kotlin.NoSuchElementException]
+     * 让机器人退出这个群.
+     * @throws IllegalStateException 当机器人为群主时
+     * @return 退出成功时 true; 已经退出时 false
      */
-    fun getMember(id: Long): Member
+    @JvmSynthetic
+    abstract suspend fun quit(): Boolean
 
     /**
-     * 更新群资料. 群资料会与服务器事件同步事件更新, 一般情况下不需要手动更新.
-     *
-     * @return 这一时刻的群资料
+     * 构造一个 [Member].
+     * 非特殊情况请不要使用这个函数. 优先使用 [get].
      */
-    suspend fun updateGroupInfo(): GroupInfo
+    @LowLevelAPI
+    @MiraiExperimentalAPI("dangerous")
+    abstract fun newMember(memberInfo: MemberInfo): Member
 
     /**
-     * 让机器人退出这个群. 机器人必须为非群主才能退出. 否则将会失败
+     * 向这个对象发送消息.
      *
-     * @see QuitGroupResponse.isSuccess 判断是否成功
+     * 单条消息最大可发送 4500 字符或 50 张图片.
+     *
+     * @see GroupMessagePreSendEvent 发送消息前事件
+     * @see GroupMessagePostSendEvent 发送消息后事件
+     *
+     * @throws EventCancelledException 当发送消息事件被取消时抛出
+     * @throws BotIsBeingMutedException 发送群消息时若 [Bot] 被禁言抛出
+     * @throws MessageTooLargeException 当消息过长时抛出
+     * @throws IllegalArgumentException 当消息内容为空时抛出 (详见 [Message.isContentEmpty])
+     *
+     * @return 消息回执. 可进行撤回 ([MessageReceipt.recall])
      */
-    suspend fun quit(): Boolean
+    @JvmSynthetic
+    abstract override suspend fun sendMessage(message: Message): MessageReceipt<Group>
 
-    fun toFullString(): String = "Group(id=${this.id}, name=$name, owner=${owner.id}, members=${members.idContentString})"
+    /**
+     * @see sendMessage
+     */
+    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE", "VIRTUAL_MEMBER_HIDDEN", "OVERRIDE_BY_INLINE")
+    @kotlin.internal.InlineOnly
+    @JvmSynthetic
+    suspend inline fun sendMessage(message: String): MessageReceipt<Group> {
+        return sendMessage(message.toMessage())
+    }
+
+    /**
+     * 上传一个图片以备发送.
+     *
+     * @see Image 查看有关图片的更多信息, 如上传图片
+     *
+     * @see BeforeImageUploadEvent 图片上传前事件, cancellable
+     * @see ImageUploadEvent 图片上传完成事件
+     *
+     * @throws EventCancelledException 当发送消息事件被取消
+     * @throws OverFileSizeMaxException 当图片文件过大而被服务器拒绝上传时. (最大大小约为 20 MB)
+     */
+    @JvmSynthetic
+    abstract override suspend fun uploadImage(image: ExternalImage): Image
+
+    companion object {
+        /**
+         * 使用 groupCode 计算 groupUin. 这两个值仅在 mirai 内部协议区分, 一般人使用时无需在意.
+         * @suppress internal api
+         */
+        @JvmStatic
+        fun calculateGroupUinByGroupCode(groupCode: Long): Long =
+            CommonGroupCalculations.calculateGroupUinByGroupCode(groupCode)
+
+        /**
+         * 使用 groupUin 计算 groupCode. 这两个值仅在 mirai 内部协议区分, 一般人使用时无需在意.
+         * @suppress internal api
+         */
+        @JvmStatic
+        fun calculateGroupCodeByGroupUin(groupUin: Long): Long =
+            CommonGroupCalculations.calculateGroupCodeByGroupUin(groupUin)
+    }
+
+    /**
+     * @see quit
+     */
+    @Suppress("FunctionName")
+    @JvmName("quit")
+    @JavaFriendlyAPI
+    fun __quitBlockingForJava__(): Boolean = runBlocking { quit() }
 }
 
 /**
- * 一般的用户可见的 ID.
- * 在 TIM/QQ 客户端中所看到的的号码均是这个 ID.
+ * 群设置
  *
- * 注: 在引用群 ID 时, 只应使用 [GroupId] 或 [GroupInternalId] 类型 (内联类无性能损失), 而不能使用 [UInt].
- *
- * @see GroupInternalId.toId 由 [GroupInternalId] 转换为 [GroupId]
- * @see GroupId.toInternalId 由 [GroupId] 转换为 [GroupInternalId]
+ * @see Group.settings 获取群设置
  */
-inline class GroupId(inline val value: Long)
+interface GroupSettings {
+    /**
+     * 入群公告, 没有时为空字符串.
+     *
+     * 在修改时将会异步上传至服务器.
+     *
+     * @see GroupEntranceAnnouncementChangeEvent
+     * @throws PermissionDeniedException 无权限修改时将会抛出异常
+     */
+    var entranceAnnouncement: String
+
+    /**
+     * 全体禁言状态. `true` 为开启.
+     *
+     * 当前仅能修改状态.
+     *
+     * @see GroupMuteAllEvent
+     * @throws PermissionDeniedException 无权限修改时将会抛出异常
+     */
+    var isMuteAll: Boolean
+
+    /**
+     * 坦白说状态. `true` 为允许.
+     *
+     * 在修改时将会异步上传至服务器.
+     *
+     * @see GroupAllowConfessTalkEvent
+     * @throws PermissionDeniedException 无权限修改时将会抛出异常
+     */
+    var isConfessTalkEnabled: Boolean
+
+    /**
+     * 允许群员邀请好友入群的状态. `true` 为允许
+     *
+     * 在修改时将会异步上传至服务器.
+     *
+     * @see GroupAllowMemberInviteEvent
+     * @throws PermissionDeniedException 无权限修改时将会抛出异常
+     */
+    var isAllowMemberInvite: Boolean
+
+    /**
+     * 自动加群审批
+     */
+    val isAutoApproveEnabled: Boolean
+
+    /**
+     * 匿名聊天
+     */
+    val isAnonymousChatEnabled: Boolean
+}
+
 
 /**
- * 将 [this] 转为 [GroupInternalId].
+ * 返回机器人是否正在被禁言
+ *
+ * @see Group.botMuteRemaining 剩余禁言时间
  */
-fun Long.groupInternalId(): GroupInternalId = GroupInternalId(this)
+inline val Group.isBotMuted: Boolean get() = this.botMuteRemaining != 0
 
-/**
- * 将无符号整数格式的 [Long] 转为 [GroupId].
- *
- * 注: 在 Java 中常用 [Long] 来表示 [UInt]
- */
-fun Long.groupId(): GroupId = GroupId(this.coerceAtLeastOrFail(0))
 
-/**
- * 一些群 API 使用的 ID. 在使用时会特别注明
- *
- * 注: 在引用群 ID 时, 应使用 [GroupId] 或 [GroupInternalId] 类型, 而不是 [UInt]
- *
- * @see GroupInternalId.toId 由 [GroupInternalId] 转换为 [GroupId]
- * @see GroupId.toInternalId 由 [GroupId] 转换为 [GroupInternalId]
- */
-inline class GroupInternalId(inline val value: Long)
+internal object CommonGroupCalculations {
+    /**
+     * by @kar98k
+     */
+    fun calculateGroupUinByGroupCode(groupCode: Long): Long {
+        var left: Long = groupCode / 1000000L
+
+        when (left) {
+            in 0..10 -> left += 202
+            in 11..19 -> left += 480 - 11
+            in 20..66 -> left += 2100 - 20
+            in 67..156 -> left += 2010 - 67
+            in 157..209 -> left += 2147 - 157
+            in 210..309 -> left += 4100 - 210
+            in 310..499 -> left += 3800 - 310
+        }
+
+        return left * 1000000L + groupCode % 1000000L
+    }
+
+    fun calculateGroupCodeByGroupUin(groupUin: Long): Long {
+        var left: Long = groupUin / 1000000L
+
+        when (left) {
+            in 0 + 202..10 + 202 -> left -= 202
+            in 11 + 480 - 11..19 + 480 - 11 -> left -= 480 - 11
+            in 20 + 2100 - 20..66 + 2100 - 20 -> left -= 2100 - 20
+            in 67 + 2010 - 67..156 + 2010 - 67 -> left -= 2010 - 67
+            in 157 + 2147 - 157..209 + 2147 - 157 -> left -= 2147 - 157
+            in 210 + 4100 - 210..309 + 4100 - 210 -> left -= 4100 - 210
+            in 310 + 3800 - 310..499 + 3800 - 310 -> left -= 3800 - 310
+        }
+
+        return left * 1000000L + groupUin % 1000000L
+    }
+}

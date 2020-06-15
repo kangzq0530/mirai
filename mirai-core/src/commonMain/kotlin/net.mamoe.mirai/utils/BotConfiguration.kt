@@ -1,89 +1,261 @@
+/*
+ * Copyright 2020 Mamoe Technologies and contributors.
+ *
+ * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
+ * Use of this source code is governed by the GNU AGPLv3 license that can be found through the following link.
+ *
+ * https://github.com/mamoe/mirai/blob/master/LICENSE
+ */
+@file:Suppress("unused", "DEPRECATION_ERROR")
+
 package net.mamoe.mirai.utils
 
-import kotlinx.io.core.IoBuffer
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import net.mamoe.mirai.Bot
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
+import kotlin.jvm.JvmField
+import kotlin.jvm.JvmOverloads
 import kotlin.jvm.JvmStatic
+import kotlin.jvm.JvmSynthetic
 
 /**
- * 验证码处理器. 需挂起(阻塞)直到处理完成验证码.
+ * [Bot] 配置.
  *
- * 返回长度为 4 的验证码. 为空则刷新验证码
+ * Kotlin 使用方法:
+ * ```
+ * val bot = Bot(...) {
+ *    // 在这里配置 Bot
+ *
+ *    bogLoggerSupplier = { bot -> ... }
+ *    fileBasedDeviceInfo()
+ *    inheritCoroutineContext() // 使用 `coroutineScope` 的 Job 作为父 Job
+ * }
+ * ```
  */
-typealias CaptchaSolver = suspend Bot.(IoBuffer) -> String?
-
-/**
- * 在各平台实现的默认的验证码处理器.
- */
-expect var DefaultCaptchaSolver: CaptchaSolver
-
-/**
- * 网络和连接配置
- */
-class BotConfiguration {
+@Suppress("PropertyName")
+open class BotConfiguration {
     /**
      * 日志记录器
+     *
+     * - 默认打印到标准输出, 通过 [DefaultLogger]
+     * - 忽略所有日志: [noBotLog]
+     * - 重定向到一个目录: `networkLoggerSupplier = { DirectoryLogger("Net ${it.id}") }`
+     * - 重定向到一个文件: `networkLoggerSupplier = { SingleFileLogger("Net ${it.id}") }`
+     *
+     * @see MiraiLogger
      */
-    var logger: PlatformLogger? = null
+    var botLoggerSupplier: ((Bot) -> MiraiLogger) = { DefaultLogger("Bot ${it.id}") }
 
     /**
-     * 父 [CoroutineContext]
+     * 网络层日志构造器
+     *
+     * - 默认打印到标准输出, 通过 [DefaultLogger]
+     * - 忽略所有日志: [noNetworkLog]
+     * - 重定向到一个目录: `networkLoggerSupplier = { DirectoryLogger("Net ${it.id}") }`
+     * - 重定向到一个文件: `networkLoggerSupplier = { SingleFileLogger("Net ${it.id}") }`
+     *
+     * @see MiraiLogger
      */
+    var networkLoggerSupplier: ((Bot) -> MiraiLogger) = { DefaultLogger("Net ${it.id}") }
+
+    /**
+     * 设备信息覆盖. 在没有手动指定时将会通过日志警告, 并使用随机设备信息.
+     * @see fileBasedDeviceInfo 使用指定文件存储设备信息
+     * @see randomDeviceInfo 使用随机设备信息
+     */
+    var deviceInfo: ((Context) -> DeviceInfo)? = deviceInfoStub
+
+    /** 父 [CoroutineContext]. [Bot] 创建后会使用 [SupervisorJob] 覆盖其 [Job], 但会将这个 [Job] 作为父 [Job] */
     var parentCoroutineContext: CoroutineContext = EmptyCoroutineContext
 
-    /**
-     * 连接每个服务器的时间
-     */
-    var touchTimeoutMillis: Long = 1.secondsToMillis
-    /**
-     * 是否使用随机的设备名.
-     * 使用随机可以降低被封禁的风险, 但可能导致每次登录都需要输入验证码
-     * 当一台设备只登录少量账号时, 将此项设置为 `false` 可能更好.
-     */
-    var randomDeviceName: Boolean = false
-    /**
-     * 心跳周期. 过长会导致被服务器断开连接.
-     */
+    /** 心跳周期. 过长会导致被服务器断开连接. */
     var heartbeatPeriodMillis: Long = 60.secondsToMillis
+
     /**
      * 每次心跳时等待结果的时间.
      * 一旦心跳超时, 整个网络服务将会重启 (将消耗约 1s). 除正在进行的任务 (如图片上传) 会被中断外, 事件和插件均不受影响.
      */
-    var heartbeatTimeoutMillis: Long = 2.secondsToMillis
-    /**
-     * 心跳失败后的第一次重连前的等待时间.
-     */
+    var heartbeatTimeoutMillis: Long = 5.secondsToMillis
+
+    /** 心跳失败后的第一次重连前的等待时间. */
     var firstReconnectDelayMillis: Long = 5.secondsToMillis
-    /**
-     * 重连失败后, 继续尝试的每次等待时间
-     */
-    var reconnectPeriodMillis: Long = 60.secondsToMillis
-    /**
-     * 最多尝试多少次重连
-     */
-    var reconnectionRetryTimes: Int = 3
-    /**
-     * 有验证码要求就失败
-     */
-    var failOnCaptcha = false
-    /**
-     * 验证码处理器
-     */
-    var captchaSolver: CaptchaSolver = DefaultCaptchaSolver
-    /**
-     * 登录完成后几秒会收到好友消息的历史记录,
-     * 这些历史记录不会触发事件.
-     * 这个选项为是否把这些记录添加到日志
-     */
-    var logPreviousMessages: Boolean = false
+
+    /** 重连失败后, 继续尝试的每次等待时间 */
+    var reconnectPeriodMillis: Long = 5.secondsToMillis
+
+    /** 最多尝试多少次重连 */
+    var reconnectionRetryTimes: Int = Int.MAX_VALUE
+
+    /** 验证码处理器 */
+    var loginSolver: LoginSolver = LoginSolver.Default
+
+    /** 使用协议类型 */
+    var protocol: MiraiProtocol = MiraiProtocol.ANDROID_PAD
+
+    /** 缓存策略  */
+    @SinceMirai("1.0.0")
+    @MiraiExperimentalAPI
+    var fileCacheStrategy: FileCacheStrategy = FileCacheStrategy.PlatformDefault
+
+    enum class MiraiProtocol(
+        /** 协议模块使用的 ID */
+        @JvmField internal val id: Long
+    ) {
+        /**
+         * Android 手机.
+         *
+         * - 与手机冲突
+         * - 与平板和电脑不冲突
+         */
+        ANDROID_PHONE(537062845),
+
+        /**
+         * Android 平板.
+         *
+         * - 与平板冲突
+         * - 与手机和电脑不冲突
+         */
+        ANDROID_PAD(537062409)
+    }
 
     companion object {
-        /**
-         * 默认的配置实例
-         */
+        /** 默认的配置实例. 可以进行修改 */
         @JvmStatic
         val Default = BotConfiguration()
     }
+
+    /**
+     * 不显示网络日志. 不推荐.
+     * @see networkLoggerSupplier 更多日志处理方式
+     */
+    @ConfigurationDsl
+    fun noNetworkLog() {
+        networkLoggerSupplier = { _ -> SilentLogger }
+    }
+
+    /**
+     * 不显示 [Bot] 日志. 不推荐.
+     * @see botLoggerSupplier 更多日志处理方式
+     */
+    @ConfigurationDsl
+    fun noBotLog() {
+        botLoggerSupplier = { _ -> SilentLogger }
+    }
+
+    /**
+     * 使用文件存储设备信息.
+     *
+     * 此函数只在 JVM 和 Android 有效. 在其他平台将会抛出异常.
+     * @param filepath 文件路径. 可相对于程序运行路径 (`user.dir`), 也可以是绝对路径.
+     * @see deviceInfo
+     */
+    @JvmOverloads
+    @ConfigurationDsl
+    fun fileBasedDeviceInfo(filepath: String = "device.json") {
+        deviceInfo = getFileBasedDeviceInfoSupplier(filepath)
+    }
+
+    /**
+     * 使用随机设备信息.
+     *
+     * @see deviceInfo
+     */
+    @ConfigurationDsl
+    fun randomDeviceInfo() {
+        deviceInfo = null
+    }
+
+    /**
+     * 使用当前协程的 [coroutineContext] 作为 [parentCoroutineContext].
+     *
+     * Bot 将会使用一个 [SupervisorJob] 覆盖 [coroutineContext] 当前协程的 [Job], 并使用当前协程的 [Job] 作为父 [Job]
+     *
+     * 用例:
+     * ```
+     * coroutineScope {
+     *   val bot = Bot(...) {
+     *     inheritCoroutineContext()
+     *   }
+     *   bot.login()
+     * } // coroutineScope 会等待 Bot 退出
+     * ```
+     *
+     *
+     * **注意**: `bot.cancel` 时将会让父 [Job] 也被 cancel.
+     * ```
+     * coroutineScope { // this: CoroutineScope
+     *   launch {
+     *     while(isActive) {
+     *       delay(500)
+     *       println("I'm alive")
+     *     }
+     *   }
+     *
+     *   val bot = Bot(...) {
+     *      inheritCoroutineContext() // 使用 `coroutineScope` 的 Job 作为父 Job
+     *   }
+     *   bot.login()
+     *   bot.cancel() // 取消了整个 `coroutineScope`, 因此上文不断打印 `"I'm alive"` 的协程也会被取消.
+     * }
+     * ```
+     *
+     * 因此, 此函数尤为适合在 `suspend fun main()` 中使用, 它能阻止主线程退出:
+     * ```
+     * suspend fun main() {
+     *   val bot = Bot() {
+     *     inheritCoroutineContext()
+     *   }
+     *   bot.subscribe { ... }
+     *
+     *   // 主线程不会退出, 直到 Bot 离线.
+     * }
+     * ```
+     *
+     * 简言之,
+     * - 若想让 [Bot] 作为 '守护进程' 运行, 则无需调用 [inheritCoroutineContext].
+     * - 若想让 [Bot] 依赖于当前协程, 让当前协程等待 [Bot] 运行, 则使用 [inheritCoroutineContext]
+     *
+     * @see parentCoroutineContext
+     */
+    @JvmSynthetic
+    @ConfigurationDsl
+    suspend inline fun inheritCoroutineContext() {
+        parentCoroutineContext = coroutineContext
+    }
+
+    /** 标注一个配置 DSL 函数 */
+    @Target(AnnotationTarget.FUNCTION)
+    @DslMarker
+    annotation class ConfigurationDsl
+
+    fun copy(): BotConfiguration {
+        return BotConfiguration().also { new ->
+            new.botLoggerSupplier = botLoggerSupplier
+            new.networkLoggerSupplier = networkLoggerSupplier
+            new.deviceInfo = deviceInfo
+            new.parentCoroutineContext = parentCoroutineContext
+            new.heartbeatPeriodMillis = heartbeatPeriodMillis
+            new.heartbeatTimeoutMillis = heartbeatTimeoutMillis
+            new.firstReconnectDelayMillis = firstReconnectDelayMillis
+            new.reconnectPeriodMillis = reconnectPeriodMillis
+            new.reconnectionRetryTimes = reconnectionRetryTimes
+            new.loginSolver = loginSolver
+            new.protocol = protocol
+            new.fileCacheStrategy = fileCacheStrategy
+        }
+    }
 }
+
+private val deviceInfoStub: (Context) -> DeviceInfo = {
+    @Suppress("DEPRECATION")
+    MiraiLogger.warning("未指定设备信息, 已使用随机设备信息. 请查看 BotConfiguration.deviceInfo 以获取更多信息.")
+    @Suppress("DEPRECATION")
+    MiraiLogger.warning("Device info isn't specified. Please refer to BotConfiguration.deviceInfo for more information")
+    SystemDeviceInfo()
+}
+
+@OptIn(ExperimentalMultiplatform::class)
+internal expect fun getFileBasedDeviceInfoSupplier(filename: String): ((Context) -> DeviceInfo)?

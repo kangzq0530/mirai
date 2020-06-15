@@ -1,3 +1,12 @@
+/*
+ * Copyright 2020 Mamoe Technologies and contributors.
+ *
+ * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
+ * Use of this source code is governed by the GNU AGPLv3 license that can be found through the following link.
+ *
+ * https://github.com/mamoe/mirai/blob/master/LICENSE
+ */
+
 package net.mamoe.mirai.utils
 
 import kotlin.annotation.AnnotationTarget.*
@@ -8,31 +17,33 @@ import kotlin.annotation.AnnotationTarget.*
  * 这些 API 可能会在任意时刻更改, 且不会发布任何预警.
  * 非常不建议在发行版本中使用这些 API.
  */
-@Experimental(level = Experimental.Level.ERROR)
+@Retention(AnnotationRetention.SOURCE)
+@RequiresOptIn(level = RequiresOptIn.Level.ERROR)
 @Target(
     CLASS, TYPEALIAS, FUNCTION, PROPERTY, FIELD, CONSTRUCTOR,
-    CLASS,
-    FUNCTION,
-    PROPERTY
+    CLASS, FUNCTION, PROPERTY
 )
+@MustBeDocumented
 annotation class MiraiInternalAPI(
     val message: String = ""
 )
 
 /**
- * 标记这个类, 类型, 函数, 属性, 字段, 或构造器为实验性的.
+ * 标记这个类, 类型, 函数, 属性, 字段, 或构造器为实验性的 API.
  *
  * 这些 API 不具有稳定性, 且可能会在任意时刻更改.
  * 不建议在发行版本中使用这些 API.
  */
-@Experimental(level = Experimental.Level.ERROR)
+@Retention(AnnotationRetention.SOURCE)
+@RequiresOptIn(level = RequiresOptIn.Level.WARNING)
 @Target(CLASS, TYPEALIAS, FUNCTION, PROPERTY, FIELD, CONSTRUCTOR)
+@MustBeDocumented
 annotation class MiraiExperimentalAPI(
     val message: String = ""
 )
 
 /**
- * 标记这个 API 是自 Mirai 某个版本起才受支持.
+ * 标记一个自 Mirai 某个版本起才支持或在这个版本修改过的 API.
  */
 @Target(CLASS, PROPERTY, FIELD, CONSTRUCTOR, FUNCTION, PROPERTY_GETTER, PROPERTY_SETTER, TYPEALIAS)
 @Retention(AnnotationRetention.BINARY)
@@ -40,16 +51,9 @@ annotation class MiraiExperimentalAPI(
 annotation class SinceMirai(val version: String)
 
 /**
- * 包的最后一次修改时间, 和分析时使用的 TIM 版本
+ * 标记一个正计划在 [version] 版本时删除的 API.
  */
-@MustBeDocumented
-@Target(AnnotationTarget.FUNCTION, AnnotationTarget.CLASS, AnnotationTarget.PROPERTY)
+@Target(CLASS, PROPERTY, FIELD, CONSTRUCTOR, FUNCTION, PROPERTY_GETTER, PROPERTY_SETTER, TYPEALIAS)
 @Retention(AnnotationRetention.SOURCE)
-annotation class PacketVersion(val date: String, val timVersion: String)
-
-/**
- * 带有这个注解的 [Packet] 将不会被记录在 log 中.
- */
-@Target(AnnotationTarget.CLASS)
-@Retention(AnnotationRetention.RUNTIME)
-annotation class NoLog
+@MustBeDocumented
+internal annotation class PlannedRemoval(val version: String)

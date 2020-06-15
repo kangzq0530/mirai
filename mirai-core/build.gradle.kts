@@ -3,44 +3,19 @@
 plugins {
     kotlin("multiplatform")
     id("kotlinx-atomicfu")
-    id("com.android.library")
-    id("kotlinx-serialization")
+    kotlin("plugin.serialization")
+    id("signing")
     `maven-publish`
-    id("com.jfrog.bintray") version "1.8.4-jetbrains-3" // DO NOT CHANGE THIS VERSION UNLESS YOU WANT TO WASTE YOUR TIME
+    id("com.jfrog.bintray") version Versions.Publishing.bintray
 }
 
-apply(from = rootProject.file("gradle/publish.gradle"))
-
-val kotlinVersion: String by rootProject.ext
-val atomicFuVersion: String by rootProject.ext
-val coroutinesVersion: String by rootProject.ext
-val kotlinXIoVersion: String by rootProject.ext
-val coroutinesIoVersion: String by rootProject.ext
-
-val klockVersion: String by rootProject.ext
-val ktorVersion: String by rootProject.ext
-
-val serializationVersion: String by rootProject.ext
-
-fun kotlinx(id: String, version: String) = "org.jetbrains.kotlinx:kotlinx-$id:$version"
-
-fun ktor(id: String, version: String) = "io.ktor:ktor-$id:$version"
-
-
-description = "QQ protocol library"
+description = "Mirai API module"
 
 val isAndroidSDKAvailable: Boolean by project
 
-android {
-    compileSdkVersion(29)
-    defaultConfig {
-        minSdkVersion(15)
-    }
-}
-
 kotlin {
     if (isAndroidSDKAvailable) {
-        project.apply(plugin = "com.android.library")
+        apply(from = rootProject.file("gradle/android.gradle"))
         android("android") {
             publishAllLibraryVariants()
         }
@@ -59,82 +34,85 @@ kotlin {
         )
     }
 
-    jvm("jvm") {
-    }
+    jvm()
 
     sourceSets {
         all {
             languageSettings.enableLanguageFeature("InlineClasses")
             languageSettings.useExperimentalAnnotation("kotlin.Experimental")
-
-            dependencies {
-                api(kotlin("stdlib", kotlinVersion))
-                api(kotlin("serialization", kotlinVersion))
-
-                api("org.jetbrains.kotlinx:atomicfu:$atomicFuVersion")
-                api(kotlinx("io", kotlinXIoVersion))
-                api(kotlinx("coroutines-io", coroutinesIoVersion))
-                api(kotlinx("coroutines-core", coroutinesVersion))
-            }
+            languageSettings.useExperimentalAnnotation("net.mamoe.mirai.utils.MiraiInternalAPI")
+            languageSettings.useExperimentalAnnotation("net.mamoe.mirai.utils.MiraiExperimentalAPI")
+            languageSettings.useExperimentalAnnotation("net.mamoe.mirai.LowLevelAPI")
+            languageSettings.useExperimentalAnnotation("kotlin.ExperimentalUnsignedTypes")
+            languageSettings.useExperimentalAnnotation("kotlin.experimental.ExperimentalTypeInference")
+            languageSettings.useExperimentalAnnotation("kotlin.time.ExperimentalTime")
+            languageSettings.useExperimentalAnnotation("kotlin.contracts.ExperimentalContracts")
+            languageSettings.progressiveMode = true
         }
+
         commonMain {
             dependencies {
-                api(kotlin("reflect", kotlinVersion))
-                api(kotlin("serialization", kotlinVersion))
-                api(kotlinx("coroutines-core-common", coroutinesVersion))
-                api(kotlinx("serialization-runtime-common", serializationVersion))
+                api(kotlin("stdlib"))
+                api(kotlin("serialization"))
+                api(kotlin("reflect"))
 
-                api(ktor("http-cio", ktorVersion))
-                api(ktor("http", ktorVersion))
-                api(ktor("client-core-jvm", ktorVersion))
-                api(ktor("client-cio", ktorVersion))
-                api(ktor("client-core", ktorVersion))
-                api(ktor("network", ktorVersion))
-                //implementation("io.ktor:ktor-io:1.3.0-beta-1")
+                api(kotlinx("serialization-runtime-common", Versions.Kotlin.serialization))
+                api(kotlinx("serialization-protobuf-common", Versions.Kotlin.serialization))
+                api(kotlinx("io", Versions.Kotlin.io))
+                api(kotlinx("coroutines-io", Versions.Kotlin.coroutinesIo))
+                api(kotlinx("coroutines-core-common", Versions.Kotlin.coroutines))
 
-                runtimeOnly(files("build/classes/kotlin/metadata/main")) // classpath is not properly set by IDE
+                api("org.jetbrains.kotlinx:atomicfu-common:${Versions.Kotlin.atomicFU}")
+
+                api(ktor("client-cio", Versions.Kotlin.ktor))
+                api(ktor("client-core", Versions.Kotlin.ktor))
+                api(ktor("network", Versions.Kotlin.ktor))
             }
         }
         commonTest {
             dependencies {
-                api(kotlin("test-annotations-common"))
-                api(kotlin("test-common"))
-
-                runtimeOnly(files("build/classes/kotlin/metadata/test")) // classpath is not properly set by IDE
+                implementation(kotlin("test-annotations-common"))
+                implementation(kotlin("test-common"))
             }
         }
 
         if (isAndroidSDKAvailable) {
             val androidMain by getting {
                 dependencies {
-                    api(kotlin("reflect", kotlinVersion))
+                    api(kotlin("reflect"))
 
-                    api(kotlinx("serialization-runtime", serializationVersion))
-                    api(kotlinx("coroutines-android", coroutinesVersion))
+                    api(kotlinx("io-jvm", Versions.Kotlin.io))
+                    api(kotlinx("serialization-runtime", Versions.Kotlin.serialization))
+                    api(kotlinx("serialization-protobuf", Versions.Kotlin.serialization))
+                    api(kotlinx("coroutines-io-jvm", Versions.Kotlin.coroutinesIo))
+                    api(kotlinx("coroutines-core", Versions.Kotlin.coroutines))
 
-                    api(ktor("client-android", ktorVersion))
+                    api(ktor("client-android", Versions.Kotlin.ktor))
                 }
             }
 
             val androidTest by getting {
                 dependencies {
-                    api(kotlin("test", kotlinVersion))
-                    api(kotlin("test-junit", kotlinVersion))
-                    api(kotlin("test-annotations-common"))
-                    api(kotlin("test-common"))
+                    implementation(kotlin("test"))
+                    implementation(kotlin("test-junit"))
+                    implementation(kotlin("test-annotations-common"))
+                    implementation(kotlin("test-common"))
                 }
             }
         }
 
         val jvmMain by getting {
             dependencies {
-                //api(kotlin("stdlib-jdk8", kotlinVersion))
-                //api(kotlin("stdlib-jdk7", kotlinVersion))
-                api(kotlin("reflect", kotlinVersion))
+                //api(kotlin("stdlib-jdk8"))
+                //api(kotlin("stdlib-jdk7"))
+                api(kotlin("reflect"))
 
-                api(ktor("client-core-jvm", ktorVersion))
-                api(kotlinx("io-jvm", kotlinXIoVersion))
-                api(kotlinx("serialization-runtime", serializationVersion))
+                api(ktor("client-core-jvm", Versions.Kotlin.ktor))
+                api(kotlinx("io-jvm", Versions.Kotlin.io))
+                api(kotlinx("serialization-runtime", Versions.Kotlin.serialization))
+                api(kotlinx("serialization-protobuf", Versions.Kotlin.serialization))
+                api(kotlinx("coroutines-io-jvm", Versions.Kotlin.coroutinesIo))
+                api(kotlinx("coroutines-core", Versions.Kotlin.coroutines))
 
                 api("org.bouncycastle:bcprov-jdk15on:1.64")
                 runtimeOnly(files("build/classes/kotlin/jvm/main")) // classpath is not properly set by IDE
@@ -143,8 +121,8 @@ kotlin {
 
         val jvmTest by getting {
             dependencies {
-                api(kotlin("test", kotlinVersion))
-                api(kotlin("test-junit", kotlinVersion))
+                implementation(kotlin("test"))
+                implementation(kotlin("test-junit"))
                 implementation("org.pcap4j:pcap4j-distribution:1.8.2")
 
                 runtimeOnly(files("build/classes/kotlin/jvm/test")) // classpath is not properly set by IDE
@@ -152,3 +130,5 @@ kotlin {
         }
     }
 }
+
+apply(from = rootProject.file("gradle/publish.gradle"))

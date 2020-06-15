@@ -1,24 +1,24 @@
+/*
+ * Copyright 2020 Mamoe Technologies and contributors.
+ *
+ * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
+ * Use of this source code is governed by the GNU AGPLv3 license that can be found through the following link.
+ *
+ * https://github.com/mamoe/mirai/blob/master/LICENSE
+ */
+
 @file:Suppress("EXPERIMENTAL_API_USAGE", "unused")
 
 package net.mamoe.mirai.utils
 
-import io.ktor.util.asStream
-import kotlinx.coroutines.Dispatchers.IO
-import kotlinx.coroutines.withContext
 import kotlinx.io.core.Input
-import kotlinx.io.core.IoBuffer
-import kotlinx.io.core.buildPacket
-import kotlinx.io.core.copyTo
-import kotlinx.io.errors.IOException
-import kotlinx.io.streams.asInput
-import kotlinx.io.streams.asOutput
+import net.mamoe.mirai.Bot
+import net.mamoe.mirai.utils.internal.DeferredReusableInput
+import net.mamoe.mirai.utils.internal.asReusableInput
 import java.awt.image.BufferedImage
 import java.io.File
 import java.io.InputStream
-import java.io.OutputStream
 import java.net.URL
-import java.security.MessageDigest
-import javax.imageio.ImageIO
 
 /*
  * 将各类型图片容器转为 [ExternalImage]
@@ -26,107 +26,64 @@ import javax.imageio.ImageIO
 
 
 /**
- * 读取 [BufferedImage] 的属性, 然后构造 [ExternalImage]
+ * 将 [BufferedImage] 保存为临时文件, 然后构造 [ExternalImage]
  */
-@Throws(IOException::class)
-fun BufferedImage.toExternalImage(formatName: String = "gif"): ExternalImage {
-    val digest = MessageDigest.getInstance("md5")
-    digest.reset()
-
-    val buffer = buildPacket {
-        ImageIO.write(this@toExternalImage, formatName, object : OutputStream() {
-            override fun write(b: Int) {
-                b.toByte().let {
-                    this@buildPacket.writeByte(it)
-                    digest.update(it)
-                }
-            }
-        })
-    }
-
-    return ExternalImage(width, height, digest.digest(), formatName, buffer)
-}
-
-suspend inline fun BufferedImage.suspendToExternalImage(): ExternalImage = withContext(IO) { toExternalImage() }
+@JvmOverloads
+fun BufferedImage.toExternalImage(formatName: String = "png"): ExternalImage =
+    ExternalImage(DeferredReusableInput(this, formatName))
 
 /**
- * 读取文件头识别图片属性, 然后构造 [ExternalImage]
+ * 将文件作为 [ExternalImage] 使用. 只会在需要的时候打开文件并读取数据.
+ * @param deleteOnClose 若为 `true`, 图片发送后将会删除这个文件
  */
-@Throws(IOException::class)
-fun File.toExternalImage(): ExternalImage {
-    val input = ImageIO.createImageInputStream(this)
-    checkNotNull(input) { "Unable to read file(path=${this.path}), no ImageInputStream found" }
-    val image = ImageIO.getImageReaders(input).asSequence().firstOrNull()
-        ?: error("Unable to read file(path=${this.path}), no ImageReader found")
-    image.input = input
-
-    return ExternalImage(
-        width = image.getWidth(0),
-        height = image.getHeight(0),
-        md5 = this.inputStream().use { it.md5() },
-        imageFormat = image.formatName,
-        input = this.inputStream().asInput(IoBuffer.Pool),
-        inputSize = this.length()
-    )
+@JvmOverloads
+fun File.toExternalImage(deleteOnClose: Boolean = false): ExternalImage {
+    require(this.isFile) { "File must be a file" }
+    require(this.exists()) { "File must exist" }
+    require(this.canRead()) { "File must can be read" }
+    return ExternalImage(asReusableInput(deleteOnClose))
 }
 
 /**
- * 在 [IO] 中进行 [File.toExternalImage]
+ * 将 [URL] 委托为 [ExternalImage].
+ * 只会在上传图片时才读取 [URL] 的内容. 具体行为取决于相关 [Bot] 的 [FileCacheStrategy]
  */
-suspend inline fun File.suspendToExternalImage(): ExternalImage = withContext(IO) { toExternalImage() }
+fun URL.toExternalImage(): ExternalImage = ExternalImage(DeferredReusableInput(this, null))
 
 /**
- * 下载文件到临时目录然后调用 [File.toExternalImage]
+ * 将 [InputStream] 委托为 [ExternalImage].
+ * 只会在上传图片时才读取 [InputStream] 的内容. 具体行为取决于相关 [Bot] 的 [FileCacheStrategy]
  */
-@Throws(IOException::class)
-fun URL.toExternalImage(): ExternalImage {
-    val file = createTempFile().apply { deleteOnExit() }
-    file.outputStream().asOutput().use { output ->
-        openStream().asInput().use { input ->
-            input.copyTo(output)
-        }
-    }
-    return file.toExternalImage()
-}
+fun InputStream.toExternalImage(): ExternalImage = ExternalImage(DeferredReusableInput(this, null))
 
 /**
- * 在 [IO] 中进行 [URL.toExternalImage]
+ * 将 [Input] 委托为 [ExternalImage].
+ * 只会在上传图片时才读取 [Input] 的内容. 具体行为取决于相关 [Bot] 的 [FileCacheStrategy]
  */
-suspend inline fun URL.suspendToExternalImage(): ExternalImage = withContext(IO) { toExternalImage() }
+fun Input.toExternalImage(): ExternalImage = ExternalImage(DeferredReusableInput(this, null))
 
-/**
- * 保存为临时文件然后调用 [File.toExternalImage]
- */
-@Throws(IOException::class)
-fun InputStream.toExternalImage(): ExternalImage {
-    val file = createTempFile().apply { deleteOnExit() }
-    file.outputStream().asOutput().use {
-        this.asInput().copyTo(it)
-    }
-    this.close()
-    return file.toExternalImage()
-}
 
-/**
- * 在 [IO] 中进行 [InputStream.toExternalImage]
- */
-suspend inline fun InputStream.suspendToExternalImage(): ExternalImage = withContext(IO) { toExternalImage() }
+@PlannedRemoval("1.2.0")
+@Suppress("RedundantSuspendModifier")
+@Deprecated("no need", ReplaceWith("toExternalImage()"), level = DeprecationLevel.ERROR)
+suspend fun Input.suspendToExternalImage(): ExternalImage = toExternalImage()
 
-/**
- * 保存为临时文件然后调用 [File.toExternalImage].
- *
- * 需要函数调用者 close [this]
- */
-@Throws(IOException::class)
-fun Input.toExternalImage(): ExternalImage {
-    val file = createTempFile().apply { deleteOnExit() }
-    file.outputStream().asOutput().use {
-        this.asStream().asInput().copyTo(it)
-    }
-    return file.toExternalImage()
-}
+@Suppress("RedundantSuspendModifier")
+@PlannedRemoval("1.2.0")
+@Deprecated("no need", ReplaceWith("toExternalImage()"), level = DeprecationLevel.ERROR)
+suspend fun InputStream.suspendToExternalImage(): ExternalImage = toExternalImage()
 
-/**
- * 在 [IO] 中进行 [Input.toExternalImage]
- */
-suspend inline fun Input.suspendToExternalImage(): ExternalImage = withContext(IO) { toExternalImage() }
+@Suppress("RedundantSuspendModifier")
+@PlannedRemoval("1.2.0")
+@Deprecated("no need", ReplaceWith("toExternalImage()"), level = DeprecationLevel.ERROR)
+suspend fun URL.suspendToExternalImage(): ExternalImage = toExternalImage()
+
+@Suppress("RedundantSuspendModifier")
+@PlannedRemoval("1.2.0")
+@Deprecated("no need", ReplaceWith("toExternalImage()"), level = DeprecationLevel.ERROR)
+suspend fun File.suspendToExternalImage(): ExternalImage = toExternalImage()
+
+@Suppress("RedundantSuspendModifier")
+@PlannedRemoval("1.2.0")
+@Deprecated("no need", ReplaceWith("toExternalImage()"), level = DeprecationLevel.ERROR)
+suspend fun BufferedImage.suspendToExternalImage(): ExternalImage = toExternalImage()

@@ -1,438 +1,442 @@
+/*
+ * Copyright 2020 Mamoe Technologies and contributors.
+ *
+ * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
+ * Use of this source code is governed by the GNU AGPLv3 license that can be found through the following link.
+ *
+ * https://github.com/mamoe/mirai/blob/master/LICENSE
+ */
+
+@file:JvmMultifileClass
+@file:JvmName("MessageUtils")
+@file:Suppress("unused", "NOTHING_TO_INLINE", "WRONG_MODIFIER_CONTAINING_DECLARATION", "INAPPLICABLE_JVM_NAME")
+
 package net.mamoe.mirai.message.data
 
-import net.mamoe.mirai.message.data.NullMessageChain.toString
-import net.mamoe.mirai.utils.MiraiExperimentalAPI
-import kotlin.contracts.ExperimentalContracts
-import kotlin.contracts.contract
+import net.mamoe.mirai.JavaFriendlyAPI
+import net.mamoe.mirai.message.MessageEvent
+import net.mamoe.mirai.utils.PlannedRemoval
 import kotlin.js.JsName
-import kotlin.jvm.Volatile
+import kotlin.jvm.JvmMultifileClass
+import kotlin.jvm.JvmName
+import kotlin.jvm.JvmOverloads
+import kotlin.jvm.JvmSynthetic
 import kotlin.reflect.KProperty
 
 /**
- * 消息链. 即 MutableList<Message>.
- * 它的一般实现为 [MessageChainImpl], `null` 实现为 [NullMessageChain]
+ * 消息链. 空的实现为 [EmptyMessageChain]
  *
- * 有关 [MessageChain] 的创建和连接:
- * - 当任意两个不是 [MessageChain] 的 [Message] 相连接后, 将会产生一个 [MessageChain].
- * - 若两个 [MessageChain] 连接, 后一个将会被合并到第一个内.
- * - 若一个 [MessageChain] 与一个其他 [Message] 连接, [Message] 将会被添加入 [MessageChain].
- * - 若一个 [Message] 与一个 [MessageChain] 连接, [Message] 将会被添加入 [MessageChain].
+ * 要获取更多消息相关的信息, 查看 [Message]
+ *
+ * ### 构造消息链
+ * - [buildMessageChain]: 使用构建器
+ * - [Message.plus]: 将两个消息相连成为一个消息链
+ * - [asMessageChain] 将 [Iterable], [Array] 等类型消息转换为 [MessageChain]
+ * - [messageChainOf] 类似 [listOf], 将多个 [Message] 构造为 [MessageChain]
+ *
+ * @see get 获取消息链中一个类型的元素, 不存在时返回 `null`
+ * @see getOrFail 获取消息链中一个类型的元素, 不存在时抛出异常 [NoSuchElementException]
+ * @see quote 引用这条消息
+ * @see recall 撤回这条消息 (仅限来自 [MessageEvent] 的消息)
+ *
+ * @see buildMessageChain 构造一个 [MessageChain]
+ * @see asMessageChain 将单个 [Message] 转换为 [MessageChain]
+ * @see asMessageChain 将 [Iterable] 或 [Sequence] 委托为 [MessageChain]
+ *
+ * @see forEachContent 遍历内容
+ * @see allContent 判断是否每一个 [MessageContent] 都满足条件
+ * @see noneContent 判断是否每一个 [MessageContent] 都不满足条件
+ *
+ * @see orNull 属性委托扩展
+ * @see orElse 属性委托扩展
+ * @see getValue 属性委托扩展
+ * @see flatten 扁平化
  */
-interface MessageChain : Message, MutableList<Message> {
-    // region Message override
-    override operator fun contains(sub: String): Boolean
-    override fun followedBy(tail: Message): MessageChain
-    // endregion
-
-    operator fun plusAssign(message: Message) {
-        this.followedBy(message)
-    }
-
-    operator fun plusAssign(plain: String) {
-        this.plusAssign(plain.toMessage())
-    }
+@Suppress("FunctionName", "DeprecatedCallableAddReplaceWith", "INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
+interface MessageChain : Message, List<SingleMessage>, RandomAccess {
+    /**
+     * 元素数量. [EmptyMessageChain] 不参加计数.
+     */
+    override val size: Int
 
     /**
-     * 获取第一个类型为 [key] 的 [Message] 实例
+     * 获取第一个类型为 [key] 的 [Message] 实例. 若不存在此实例, 返回 `null`
+     *
+     * ### Kotlin 使用方法
+     * ```
+     * val chain: MessageChain = ...
+     *
+     * val at = Message[At] // At 为伴生对象
+     * ```
+     *
+     * ### Java 使用方法
+     * ```java
+     * MessageChain chain = ...
+     * chain.first(At.Key)
+     * ```
      *
      * @param key 由各个类型消息的伴生对象持有. 如 [PlainText.Key]
+     *
+     * @see MessageChain.getOrFail 在找不到此类型的元素时抛出 [NoSuchElementException]
      */
-    operator fun <M : Message> get(key: Message.Key<M>): M = first(key)
+    @JvmName("first")
+    operator fun <M : Message> get(key: Message.Key<M>): M? = firstOrNull(key)
 
+    /**
+     * 遍历每一个有内容的消息, 即 [At], [AtAll], [PlainText], [Image], [Face] 等
+     * 仅供 `Java` 使用
+     */
+    @JvmName("forEachContent")
+    @JavaFriendlyAPI
+    fun __forEachContentForJava__(block: (Message) -> Unit) = this.forEachContent(block)
+
+    @PlannedRemoval("1.2.0")
+    @JvmName("firstOrNull")
+    @Deprecated(
+        "use get instead. This is going to be removed in mirai 1.2.0",
+        ReplaceWith("get(key)"),
+        level = DeprecationLevel.ERROR
+    )
+    fun <M : Message> getOrNull(key: Message.Key<M>): M? = get(key)
 }
 
-/**
- * 提供一个类型的值. 若不存在则会抛出异常 [NoSuchElementException]
- */
-inline operator fun <reified T : Message> MessageChain.getValue(thisRef: Any?, property: KProperty<*>): T = this.first<T>() as T
+// region accessors
 
 /**
- * 构造无初始元素的可修改的 [MessageChain]. 初始大小将会被设定为 8
- */
-@JsName("emptyMessageChain")
-@Suppress("FunctionName")
-fun MessageChain(): MessageChain = EmptyMessageChain()
-
-/**
- * 构造无初始元素的可修改的 [MessageChain]. 初始大小将会被设定为 [initialCapacity]
- */
-@Suppress("FunctionName")
-fun MessageChain(initialCapacity: Int): MessageChain =
-    if (initialCapacity == 0) EmptyMessageChain()
-    else MessageChainImpl(ArrayList(initialCapacity))
-
-/**
- * 构造 [MessageChain]
- * 若仅提供一个参数, 请考虑使用 [Message.chain] 以优化性能
- */
-@Suppress("FunctionName")
-fun MessageChain(vararg messages: Message): MessageChain =
-    if (messages.isEmpty()) EmptyMessageChain()
-    else MessageChainImpl(messages.toMutableList())
-
-/**
- * 构造 [MessageChain]
- */
-@Suppress("FunctionName")
-fun MessageChain(messages: Iterable<Message>): MessageChain =
-    MessageChainImpl(messages.toMutableList())
-
-/**
- * 构造单元素的不可修改的 [MessageChain]. 内部类实现为 [SingleMessageChain]
+ * 获取第一个类型为 [key] 的 [Message] 实例, 在找不到此类型的元素时抛出 [NoSuchElementException]
  *
- * 参数 [delegate] 不能为 [MessageChain] 的实例, 否则将会抛出异常.
- * 使用 [Message.chain] 将帮助提前处理这个问题.
- *
- * @param delegate 所构造的单元素 [MessageChain] 代表的 [Message]
- * @throws IllegalArgumentException 当 [delegate] 为 [MessageChain] 的实例时
- *
- * @see Message.chain receiver 模式
+ * @param key 由各个类型消息的伴生对象持有. 如 [PlainText.Key]
  */
-@MiraiExperimentalAPI
-@UseExperimental(ExperimentalContracts::class)
-@Suppress("FunctionName")
-fun SingleMessageChain(delegate: Message): MessageChain {
-    contract {
-        returns() implies (delegate !is MessageChain)
+@JvmOverloads
+inline fun <M : Message> MessageChain.getOrFail(
+    key: Message.Key<M>,
+    crossinline lazyMessage: (key: Message.Key<M>) -> String = { key.typeName }
+): M = firstOrNull(key) ?: throw NoSuchElementException(lazyMessage(key))
+
+
+/**
+ * 遍历每一个 [消息内容][MessageContent]
+ */
+@JvmSynthetic
+inline fun MessageChain.forEachContent(block: (MessageContent) -> Unit) {
+    for (element in this) {
+        if (element !is MessageMetadata) {
+            check(element is MessageContent) { "internal error: Message must be either MessageMetaData or MessageContent" }
+            block(element)
+        }
     }
-    require(delegate !is MessageChain) { "delegate for SingleMessageChain should not be any instance of MessageChain" }
-    return SingleMessageChainImpl(delegate)
 }
 
+/**
+ * 如果每一个 [消息内容][MessageContent] 都满足 [block], 返回 `true`
+ */
+@JvmSynthetic
+inline fun MessageChain.allContent(block: (MessageContent) -> Boolean): Boolean {
+    this.forEach {
+        if (it !is MessageMetadata) {
+            check(it is MessageContent) { "internal error: Message must be either MessageMetaData or MessageContent" }
+            if (!block(it)) return false
+        }
+    }
+    return true
+}
+
+/**
+ * 如果每一个 [消息内容][MessageContent] 都不满足 [block], 返回 `true`
+ */
+@JvmSynthetic
+inline fun MessageChain.noneContent(block: (MessageContent) -> Boolean): Boolean {
+    this.forEach {
+        if (it !is MessageMetadata) {
+            check(it is MessageContent) { "internal error: Message must be either MessageMetaData or MessageContent" }
+            if (block(it)) return false
+        }
+    }
+    return true
+}
+
+
+/**
+ * 获取第一个 [M] 类型的 [Message] 实例
+ */
+@JvmSynthetic
+inline fun <reified M : Message?> MessageChain.firstIsInstanceOrNull(): M? = this.firstOrNull { it is M } as M?
+
+/**
+ * 获取第一个 [M] 类型的 [Message] 实例
+ * @throws [NoSuchElementException] 如果找不到该类型的实例
+ */
+@JvmSynthetic
+inline fun <reified M : Message> MessageChain.firstIsInstance(): M = this.first { it is M } as M
+
+/**
+ * 判断 [this] 中是否存在 [Message] 的实例
+ */
+@JvmSynthetic
+inline fun <reified M : Message> MessageChain.anyIsInstance(): Boolean = this.any { it is M }
+
+
+/**
+ * 获取第一个 [M] 类型的 [Message] 实例
+ */
+@JvmSynthetic
+@Suppress("UNCHECKED_CAST")
+fun <M : Message> MessageChain.firstOrNull(key: Message.Key<M>): M? = firstOrNullImpl(key)
+
+/**
+ * 获取第一个 [M] 类型的 [Message] 实例
+ * @throws [NoSuchElementException] 如果找不到该类型的实例
+ */
+@JvmSynthetic
+@Suppress("UNCHECKED_CAST")
+inline fun <M : Message> MessageChain.first(key: Message.Key<M>): M =
+    firstOrNull(key) ?: throw NoSuchElementException("Message type ${key.typeName} not found in chain $this")
+
+/**
+ * 获取第一个 [M] 类型的 [Message] 实例
+ */
+@JvmSynthetic
+@Suppress("UNCHECKED_CAST")
+inline fun <M : Message> MessageChain.any(key: Message.Key<M>): Boolean = firstOrNull(key) != null
+
+// endregion accessors
+
+
+// region delegate
+
+/**
+ * 提供一个类型的值的委托. 若不存在则会抛出异常 [NoSuchElementException]
+ *
+ * 用法:
+ * ```
+ * val message: MessageChain
+ *
+ * val at: At by message
+ * val image: Image by message
+ */
+@JvmSynthetic
+inline operator fun <reified T : Message> MessageChain.getValue(thisRef: Any?, property: KProperty<*>): T =
+    this.firstIsInstance()
+
+/**
+ * 可空的委托
+ * @see orNull
+ */
+inline class OrNullDelegate<out R : Message?>(private val value: Any?) {
+    @Suppress("UNCHECKED_CAST")
+    operator fun getValue(thisRef: Any?, property: KProperty<*>): R = value as R
+}
+
+/**
+ * 提供一个类型的 [Message] 的委托, 若不存在这个类型的 [Message] 则委托会提供 `null`
+ *
+ * 用法:
+ * ```
+ * val message: MessageChain
+ *
+ * val at: At? by message.orNull()
+ * ```
+ * @see orNull 提供一个不存在则 null 的委托
+ * @see orElse 提供一个不存在则使用默认值的委托
+ */
+@JvmSynthetic
+inline fun <reified T : Message> MessageChain.orNull(): OrNullDelegate<T?> =
+    OrNullDelegate(this.firstIsInstanceOrNull<T>())
+
+/**
+ * 提供一个类型的 [Message] 的委托, 若不存在这个类型的 [Message] 则委托会提供 `null`
+ *
+ * 用法:
+ * ```
+ * val message: MessageChain
+ *
+ * val at: At by message.orElse { /* 返回一个 At */  }
+ * val atNullable: At? by message.orElse { /* 返回一个 At? */  }
+ * ```
+ * @see orNull 提供一个不存在则 null 的委托
+ */
+@Suppress("RemoveExplicitTypeArguments")
+@JvmSynthetic
+inline fun <reified T : Message?> MessageChain.orElse(
+    lazyDefault: () -> T
+): OrNullDelegate<T> =
+    OrNullDelegate<T>(this.firstIsInstanceOrNull<T>() ?: lazyDefault())
+
+// endregion delegate
+
+
+// region asMessageChain
+
+/**
+ * 返回一个包含 [messages] 所有元素的消息链, 保留顺序.
+ */
+@JvmName("newChain")
+inline fun messageChainOf(vararg messages: Message): MessageChain = messages.asMessageChain()
 
 /**
  * 得到包含 [this] 的 [MessageChain].
- * 若 [this] 为 [MessageChain] 将直接返回 this
- * 否则将调用 [MessageChain] 构造一个 [MessageChainImpl]
+ *
+ * 若 [this] 为 [MessageChain] 将直接返回 this,
+ * 若 [this] 为 [CombinedMessage] 将 [扁平化][flatten] 后委托为 [MessageChain],
+ * 否则将调用 [asMessageChain]
  */
-@Suppress("NOTHING_TO_INLINE")
-inline fun Message.chain(): MessageChain = if (this is MessageChain) this else MessageChain(
-    this
-)
-
-/**
- * 构造 [MessageChain]
- */
-@Suppress("unused", "NOTHING_TO_INLINE")
-inline fun List<Message>.messageChain(): MessageChain =
-    MessageChain(this)
-
-
-/**
- * 获取第一个 [M] 类型的 [Message] 实例
- */
-inline fun <reified M : Message> MessageChain.firstOrNull(): Message? = this.firstOrNull { it is M }
-
-/**
- * 获取第一个 [M] 类型的 [Message] 实例
- * @throws [NoSuchElementException] 如果找不到该类型的实例
- */
-inline fun <reified M : Message> MessageChain.first(): Message = this.first { it is M }
-
-/**
- * 获取第一个 [M] 类型的 [Message] 实例
- */
-inline fun <reified M : Message> MessageChain.any(): Boolean = this.firstOrNull { it is M } !== null
-
-
-/**
- * 获取第一个 [M] 类型的 [Message] 实例
- */
+@JvmName("newChain")
+@JsName("newChain")
 @Suppress("UNCHECKED_CAST")
-fun <M : Message> MessageChain.firstOrNull(key: Message.Key<M>): M? = when (key) {
-    At -> first<At>()
-    PlainText -> first<PlainText>()
-    Image -> first<Image>()
-    Face -> first<Face>()
-    else -> null
-} as M
-
-/**
- * 获取第一个 [M] 类型的 [Message] 实例
- * @throws [NoSuchElementException] 如果找不到该类型的实例
- */
-@Suppress("UNCHECKED_CAST")
-fun <M : Message> MessageChain.first(key: Message.Key<M>): M = firstOrNull(key) ?: error("unknown key: $key")
-
-/**
- * 获取第一个 [M] 类型的 [Message] 实例
- */
-@Suppress("UNCHECKED_CAST")
-fun <M : Message> MessageChain.any(key: Message.Key<M>): Boolean = firstOrNull(key) != null
-
-/**
- * 空的 [Message].
- *
- * 它不包含任何元素, 但维护一个 'lazy' 的 [MessageChainImpl].
- *
- * 只有在必要的时候(如迭代([iterator]), 插入([add]), 连接([followedBy], [plus], [plusAssign]))才会创建这个对象代表的 list
- *
- * 它是一个正常的 [Message] 和 [MessageChain]. 可以做所有 [Message] 能做的事.
- */
-class EmptyMessageChain : MessageChain {
-    private val delegate: MessageChain by lazy {
-        MessageChainImpl().also { initialized = true }
-    }
-
-    @Volatile
-    private var initialized: Boolean = false
-
-    override fun subList(fromIndex: Int, toIndex: Int): MutableList<Message> =
-        if (initialized) delegate.subList(
-            fromIndex,
-            toIndex
-        ) else throw IndexOutOfBoundsException("given args that from $fromIndex to $toIndex, but the list is empty")
-
-    override fun toString(): String = if (initialized) delegate.toString() else ""
-
-    override fun contains(sub: String): Boolean = if (initialized) delegate.contains(sub) else false
-    override fun contains(element: Message): Boolean = if (initialized) delegate.contains(element) else false
-    override fun followedBy(tail: Message): MessageChain = delegate.followedBy(tail)
-
-    override val size: Int = if (initialized) delegate.size else 0
-    override fun containsAll(elements: Collection<Message>): Boolean =
-        if (initialized) delegate.containsAll(elements) else false
-
-    override fun get(index: Int): Message =
-        if (initialized) delegate[index] else throw IndexOutOfBoundsException(index.toString())
-
-    override fun indexOf(element: Message): Int = if (initialized) delegate.indexOf(element) else -1
-    override fun isEmpty(): Boolean = if (initialized) delegate.isEmpty() else true
-    override fun iterator(): MutableIterator<Message> = delegate.iterator()
-
-    override fun lastIndexOf(element: Message): Int = if (initialized) delegate.lastIndexOf(element) else -1
-    override fun add(element: Message): Boolean = delegate.add(element)
-    override fun add(index: Int, element: Message) = delegate.add(index, element)
-    override fun addAll(index: Int, elements: Collection<Message>): Boolean = delegate.addAll(elements)
-    override fun addAll(elements: Collection<Message>): Boolean = delegate.addAll(elements)
-    override fun clear() {
-        if (initialized) delegate.clear()
-    }
-
-    override fun listIterator(): MutableListIterator<Message> = delegate.listIterator()
-
-    override fun listIterator(index: Int): MutableListIterator<Message> = delegate.listIterator()
-    override fun remove(element: Message): Boolean = if (initialized) delegate.remove(element) else false
-    override fun removeAll(elements: Collection<Message>): Boolean =
-        if (initialized) delegate.removeAll(elements) else false
-
-    override fun removeAt(index: Int): Message =
-        if (initialized) delegate.removeAt(index) else throw IndexOutOfBoundsException(index.toString())
-
-    override fun retainAll(elements: Collection<Message>): Boolean =
-        if (initialized) delegate.retainAll(elements) else false
-
-    override fun set(index: Int, element: Message): Message =
-        if (initialized) delegate.set(index, element) else throw IndexOutOfBoundsException(index.toString())
+fun Message.asMessageChain(): MessageChain = when (this) {
+    is MessageChain -> this
+    is CombinedMessage -> (this as Iterable<Message>).asMessageChain()
+    else -> SingleMessageChainImpl(this as SingleMessage)
 }
 
 /**
- * Null 的 [MessageChain].
- * 它不包含任何元素, 也没有创建任何 list.
- *
- * 除 [toString] 外, 其他方法均 [error]
+ * 直接将 [this] 委托为一个 [MessageChain]
  */
-object NullMessageChain : MessageChain {
-    override fun subList(fromIndex: Int, toIndex: Int): MutableList<Message> = error("accessing NullMessageChain")
-
-    override fun toString(): String = "null"
-
-    override fun contains(sub: String): Boolean = error("accessing NullMessageChain")
-    override fun contains(element: Message): Boolean = error("accessing NullMessageChain")
-    override fun followedBy(tail: Message): MessageChain = error("accessing NullMessageChain")
-
-    override val size: Int get() = error("accessing NullMessageChain")
-    override fun containsAll(elements: Collection<Message>): Boolean = error("accessing NullMessageChain")
-    override fun get(index: Int): Message = error("accessing NullMessageChain")
-    override fun indexOf(element: Message): Int = error("accessing NullMessageChain")
-    override fun isEmpty(): Boolean = error("accessing NullMessageChain")
-    override fun iterator(): MutableIterator<Message> = error("accessing NullMessageChain")
-
-    override fun lastIndexOf(element: Message): Int = error("accessing NullMessageChain")
-    override fun add(element: Message): Boolean = error("accessing NullMessageChain")
-    override fun add(index: Int, element: Message) = error("accessing NullMessageChain")
-    override fun addAll(index: Int, elements: Collection<Message>): Boolean = error("accessing NullMessageChain")
-
-    override fun addAll(elements: Collection<Message>): Boolean = error("accessing NullMessageChain")
-    override fun clear() {
-        error("accessing NullMessageChain")
-    }
-
-    override fun listIterator(): MutableListIterator<Message> = error("accessing NullMessageChain")
-
-    override fun listIterator(index: Int): MutableListIterator<Message> = error("accessing NullMessageChain")
-
-    override fun remove(element: Message): Boolean = error("accessing NullMessageChain")
-    override fun removeAll(elements: Collection<Message>): Boolean = error("accessing NullMessageChain")
-    override fun removeAt(index: Int): Message = error("accessing NullMessageChain")
-    override fun retainAll(elements: Collection<Message>): Boolean = error("accessing NullMessageChain")
-    override fun set(index: Int, element: Message): Message = error("accessing NullMessageChain")
-}
+@JvmSynthetic
+fun SingleMessage.asMessageChain(): MessageChain = SingleMessageChainImpl(this)
 
 /**
- * [MessageChain] 实现
- * 它是一个特殊的 [Message], 实现 [MutableList] 接口, 但将所有的接口调用都转到内部维护的另一个 [MutableList].
+ * 直接将 [this] 委托为一个 [MessageChain]
  */
-internal inline class MessageChainImpl constructor(
-    /**
-     * Elements will not be instances of [MessageChain]
-     */
-    private val delegate: MutableList<Message>
-) : Message, MutableList<Message>, // do not `by delegate`, bcz Inline class cannot implement an interface by delegation
-    MessageChain {
-
-    constructor(vararg messages: Message) : this(messages.toMutableList())
-
-    // region Message override
-    override fun toString(): String =  this.delegate.joinToString("") { it.toString() }
-
-    override operator fun contains(sub: String): Boolean = delegate.any { it.contains(sub) }
-    override fun followedBy(tail: Message): MessageChain {
-        require(tail !is SingleOnly) { "SingleOnly Message cannot follow another message" }
-        if (tail is MessageChain) tail.forEach { child -> this.followedBy(child) }
-        else this.delegate.add(tail)
-        return this
-    }
-
-    // endregion
-
-    // region MutableList override
-    override fun containsAll(elements: Collection<Message>): Boolean = delegate.containsAll(elements)
-
-    override operator fun get(index: Int): Message = delegate[index]
-    override fun indexOf(element: Message): Int = delegate.indexOf(element)
-    override fun isEmpty(): Boolean = delegate.isEmpty()
-    override fun lastIndexOf(element: Message): Int = delegate.lastIndexOf(element)
-    override fun add(element: Message): Boolean = delegate.add(element)
-    override fun add(index: Int, element: Message) = delegate.add(index, element)
-    override fun addAll(index: Int, elements: Collection<Message>): Boolean = delegate.addAll(index, elements)
-    override fun addAll(elements: Collection<Message>): Boolean = delegate.addAll(elements)
-    override fun clear() = delegate.clear()
-    override fun listIterator(): MutableListIterator<Message> = delegate.listIterator()
-    override fun listIterator(index: Int): MutableListIterator<Message> = delegate.listIterator(index)
-    override fun remove(element: Message): Boolean = delegate.remove(element)
-    override fun removeAll(elements: Collection<Message>): Boolean = delegate.removeAll(elements)
-    override fun removeAt(index: Int): Message = delegate.removeAt(index)
-    override fun retainAll(elements: Collection<Message>): Boolean = delegate.retainAll(elements)
-    override fun set(index: Int, element: Message): Message = delegate.set(index, element)
-    override fun subList(fromIndex: Int, toIndex: Int): MutableList<Message> = delegate.subList(fromIndex, toIndex)
-    override operator fun iterator(): MutableIterator<Message> = delegate.iterator()
-    override operator fun contains(element: Message): Boolean = delegate.contains(element)
-    override val size: Int get() = delegate.size
-    // endregion
-}
+@JvmSynthetic
+fun Collection<SingleMessage>.asMessageChain(): MessageChain =
+    MessageChainImplByCollection(this.constrainSingleMessages())
 
 /**
- * 单个成员的不可修改的 [MessageChain].
- *
- * 在连接时将会把它当做一个普通 [Message] 看待, 但它不能被 [plusAssign]
+ * 将 [this] [扁平化后][flatten] 委托为一个 [MessageChain]
  */
-internal inline class SingleMessageChainImpl(
-    private val delegate: Message
-) : Message, MutableList<Message>,
-    MessageChain {
+@JvmSynthetic
+@JvmName("newChain1")
+// @JsName("newChain")
+fun Array<out Message>.asMessageChain(): MessageChain = MessageChainImplBySequence(this.flatten())
 
-    // region Message override
-    override operator fun contains(sub: String): Boolean = delegate.contains(sub)
-    override fun followedBy(tail: Message): MessageChain {
-        require(tail !is SingleOnly) { "SingleOnly Message cannot follow another message" }
-        return if (tail is MessageChain) tail.apply { followedBy(delegate) }
-        else MessageChain(delegate, tail)
-    }
+@JvmSynthetic
+@JvmName("newChain2")
+fun Array<out SingleMessage>.asMessageChain(): MessageChain = MessageChainImplBySequence(this.asSequence())
 
-    override fun plusAssign(message: Message) =
-        throw UnsupportedOperationException("SingleMessageChainImpl cannot be plusAssigned")
+/**
+ * 将 [this] [扁平化后][flatten] 委托为一个 [MessageChain]
+ */
+@JvmName("newChain")
+// @JsName("newChain")
+fun Collection<Message>.asMessageChain(): MessageChain = MessageChainImplBySequence(this.flatten())
 
-    override fun toString(): String = delegate.toString()
-    // endregion
+/**
+ * 直接将 [this] 委托为一个 [MessageChain]
+ */
+@JvmSynthetic
+fun Iterable<SingleMessage>.asMessageChain(): MessageChain =
+    MessageChainImplByCollection(this.constrainSingleMessages())
 
-    // region MutableList override
-    override fun containsAll(elements: Collection<Message>): Boolean = elements.all { it === delegate }
+@JvmSynthetic
+inline fun MessageChain.asMessageChain(): MessageChain = this // 避免套娃
 
-    override operator fun get(index: Int): Message = if (index == 0) delegate else throw NoSuchElementException()
-    override fun indexOf(element: Message): Int = if (delegate === element) 0 else -1
-    override fun isEmpty(): Boolean = false
-    override fun lastIndexOf(element: Message): Int = if (delegate === element) 0 else -1
-    override fun add(element: Message): Boolean = throw UnsupportedOperationException()
-    override fun add(index: Int, element: Message) = throw UnsupportedOperationException()
-    override fun addAll(index: Int, elements: Collection<Message>): Boolean = throw UnsupportedOperationException()
-    override fun addAll(elements: Collection<Message>): Boolean = throw UnsupportedOperationException()
-    override fun clear() = throw UnsupportedOperationException()
-    override fun listIterator(): MutableListIterator<Message> = object : MutableListIterator<Message> {
-        private var hasNext = true
-        override fun hasPrevious(): Boolean = !hasNext
-        override fun nextIndex(): Int = if (hasNext) 0 else -1
-        override fun previous(): Message =
-            if (hasPrevious()) {
-                hasNext = true
-                delegate
-            } else throw NoSuchElementException()
+/**
+ * 将 [this] [扁平化后][flatten] 委托为一个 [MessageChain]
+ */
+@JvmName("newChain")
+// @JsName("newChain")
+fun Iterable<Message>.asMessageChain(): MessageChain = MessageChainImplBySequence(this.flatten())
 
-        override fun previousIndex(): Int = if (!hasNext) 0 else -1
-        override fun add(element: Message) = throw UnsupportedOperationException()
-        override fun hasNext(): Boolean = hasNext
-        override fun next(): Message =
-            if (hasNext) {
-                hasNext = false
-                delegate
-            } else throw NoSuchElementException()
+/**
+ * 直接将 [this] 委托为一个 [MessageChain]
+ */
+@JvmSynthetic
+fun Sequence<SingleMessage>.asMessageChain(): MessageChain = MessageChainImplBySequence(this)
 
-        override fun remove() = throw UnsupportedOperationException()
-        override fun set(element: Message) = throw UnsupportedOperationException()
-    }
-
-    override fun listIterator(index: Int): MutableListIterator<Message> =
-        if (index == 0) listIterator() else throw UnsupportedOperationException()
-
-    override fun remove(element: Message): Boolean = throw UnsupportedOperationException()
-    override fun removeAll(elements: Collection<Message>): Boolean = throw UnsupportedOperationException()
-    override fun removeAt(index: Int): Message = throw UnsupportedOperationException()
-    override fun retainAll(elements: Collection<Message>): Boolean = throw UnsupportedOperationException()
-    override fun set(index: Int, element: Message): Message = throw UnsupportedOperationException()
-    override fun subList(fromIndex: Int, toIndex: Int): MutableList<Message> {
-        return if (fromIndex == 0) when (toIndex) {
-            1 -> mutableListOf<Message>(this)
-            0 -> mutableListOf()
-            else -> throw UnsupportedOperationException()
-        }
-        else throw UnsupportedOperationException()
-    }
-
-    override fun iterator(): MutableIterator<Message> = object : MutableIterator<Message> {
-        private var hasNext = true
-        override fun hasNext(): Boolean = hasNext
-        override fun next(): Message =
-            if (hasNext) {
-                hasNext = false
-                delegate
-            } else throw NoSuchElementException()
-
-        override fun remove() = throw UnsupportedOperationException()
-    }
-
-    override operator fun contains(element: Message): Boolean = element === delegate
-    override val size: Int get() = 1
-    // endregion
-}
+/**
+ * 将 [this] [扁平化后][flatten] 委托为一个 [MessageChain]
+ */
+@JvmName("newChain")
+// @JsName("newChain")
+fun Sequence<Message>.asMessageChain(): MessageChain = MessageChainImplBySequence(this.flatten())
 
 
+/**
+ * 构造一个 [MessageChain]
+ * 为提供更好的 Java API.
+ */
 @Suppress("FunctionName")
-private fun <E> EmptyMutableIterator(): MutableIterator<E> = object : MutableIterator<E> {
-    override fun hasNext(): Boolean = false
-    override fun next(): E = throw NoSuchElementException()
-    override fun remove() = throw NoSuchElementException()
+@JvmName("newChain")
+fun _____newChain______(messages: String): MessageChain {
+    return messages.toMessage().asMessageChain()
 }
 
-@Suppress("FunctionName")
-private fun <E> EmptyMutableListIterator(): MutableListIterator<E> = object : MutableListIterator<E> {
-    override fun hasPrevious(): Boolean = false
-    override fun nextIndex(): Int = -1
-    override fun previous(): E = throw NoSuchElementException()
-    override fun previousIndex(): Int = -1
-    override fun add(element: E) = throw UnsupportedOperationException()
-    override fun hasNext(): Boolean = false
-    override fun next(): E = throw NoSuchElementException()
-    override fun remove() = throw NoSuchElementException()
-    override fun set(element: E) = throw UnsupportedOperationException()
+/**
+ * 扁平化消息序列.
+ *
+ * 原 [this]:
+ * ```
+ * A <- CombinedMessage(B, C) <- D <- MessageChain(E, F, G)
+ * ```
+ * 结果 [Sequence]:
+ * ```
+ * A <- B <- C <- D <- E <- F <- G
+ * ```
+ */
+inline fun Iterable<Message>.flatten(): Sequence<SingleMessage> = asSequence().flatten()
+
+// @JsName("flatten1")
+@JvmName("flatten1")// avoid platform declare clash
+@JvmSynthetic
+inline fun Iterable<SingleMessage>.flatten(): Sequence<SingleMessage> = this.asSequence() // fast path
+
+/**
+ * 扁平化消息序列.
+ *
+ * 原 [this]:
+ * ```
+ * A <- CombinedMessage(B, C) <- D <- MessageChain(E, F, G)
+ * ```
+ * 结果 [Sequence]:
+ * ```
+ * A <- B <- C <- D <- E <- F <- G
+ * ```
+ */
+inline fun Sequence<Message>.flatten(): Sequence<SingleMessage> = flatMap { it.flatten() }
+
+@JsName("flatten1") // avoid platform declare clash
+@JvmName("flatten1")
+@JvmSynthetic
+inline fun Sequence<SingleMessage>.flatten(): Sequence<SingleMessage> = this // fast path
+
+inline fun Array<out Message>.flatten(): Sequence<SingleMessage> = this.asSequence().flatten()
+
+inline fun Array<out SingleMessage>.flatten(): Sequence<SingleMessage> = this.asSequence() // fast path
+
+/**
+ * 扁平化 [Message]
+ *
+ * 对于不同类型的接收者（receiver）:
+ * - [CombinedMessage]`(A, B)` 返回 `A <- B`
+ * - `[MessageChain](E, F, G)` 返回 `E <- F <- G`
+ * - 其他: 返回 `sequenceOf(this)`
+ */
+fun Message.flatten(): Sequence<SingleMessage> {
+    return when (this) {
+        is MessageChain -> this.asSequence()
+        is CombinedMessage -> this.asSequence() // already constrained single.
+        else -> sequenceOf(this as SingleMessage)
+    }
 }
 
+@JvmSynthetic // make Java user happier with less methods
+inline fun MessageChain.flatten(): Sequence<SingleMessage> = this.asSequence() // fast path
+
+// endregion converters
+
+
+/**
+ * 不含任何元素的 [MessageChain].
+ */
+object EmptyMessageChain : MessageChain, Iterator<SingleMessage>, List<SingleMessage> by emptyList() {
+
+    override val size: Int get() = 0
+    override fun toString(): String = ""
+    override fun contentToString(): String = ""
+    override fun equals(other: Any?): Boolean = other === this
+
+    override fun iterator(): Iterator<SingleMessage> = this
+    override fun hasNext(): Boolean = false
+    override fun next(): SingleMessage = throw NoSuchElementException("EmptyMessageChain is empty.")
+}

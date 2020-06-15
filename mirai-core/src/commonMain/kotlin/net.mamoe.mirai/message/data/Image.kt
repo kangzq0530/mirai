@@ -1,73 +1,203 @@
-@file:Suppress("EXPERIMENTAL_API_USAGE")
+/*
+ * Copyright 2020 Mamoe Technologies and contributors.
+ *
+ * 此源代码的使用受 GNU AFFERO GENERAL PUBLIC LICENSE version 3 许可证的约束, 可以在以下链接找到该许可证.
+ * Use of this source code is governed by the GNU AGPLv3 license that can be found through the following link.
+ *
+ * https://github.com/mamoe/mirai/blob/master/LICENSE
+ */
+
+@file:JvmMultifileClass
+@file:JvmName("MessageUtils")
+
+@file:Suppress(
+    "EXPERIMENTAL_API_USAGE",
+    "unused",
+    "WRONG_MODIFIER_CONTAINING_DECLARATION",
+    "DEPRECATION",
+    "UnusedImport",
+    "EXPOSED_SUPER_CLASS",
+    "DEPRECATION_ERROR"
+)
 
 package net.mamoe.mirai.message.data
 
+import net.mamoe.mirai.Bot
 import net.mamoe.mirai.contact.Contact
-import net.mamoe.mirai.contact.sendMessage
+import net.mamoe.mirai.message.code.CodableMessage
 import net.mamoe.mirai.utils.ExternalImage
-
-
-fun Image(id: String) = Image(ImageId(id))
+import net.mamoe.mirai.utils.sendImage
+import kotlin.js.JsName
+import kotlin.jvm.JvmMultifileClass
+import kotlin.jvm.JvmName
+import kotlin.jvm.JvmSynthetic
 
 /**
- * 图片消息. 在发送时将会区分群图片和好友图片发送.
- * 由接收消息时构建, 可直接发送
+ * 自定义表情 (收藏的表情) 和普通图片.
  *
- * @param id 这个图片的 [ImageId]
- */
-inline class Image(inline val id: ImageId) : Message {
-    override fun toString(): String = "[${id.value}]"
-
-    companion object Key : Message.Key<Image>
-}
-
-inline val Image.idValue: String get() = id.value
-
-inline class ImageId0x06(override inline val value: String) : ImageId {
-    override fun toString(): String = "ImageId($value)"
-}
-
-/**
- * 一般是群的图片的 id.
- */
-class ImageId0x03 constructor(override inline val value: String, inline val uniqueId: UInt, inline val height: Int, inline val width: Int) :
-    ImageId {
-    override fun toString(): String = "ImageId(value=$value, uniqueId=${uniqueId}, height=$height, width=$width)"
-
-    val md5: ByteArray
-        get() = this.value
-            .substringAfter("{").substringBefore("}")
-            .replace("-", "")
-            .chunked(2)
-            .map { (it[0] + it[1].toString()).toUByte(16).toByte() }
-            .toByteArray().also { check(it.size == 16) }
-}
-
-@Suppress("FunctionName", "NOTHING_TO_INLINE")
-inline fun ImageId(value: String): ImageId = ImageId0x06(value)
-
-@Suppress("FunctionName", "NOTHING_TO_INLINE")
-inline fun ImageId(value: String, uniqueId: UInt, height: Int, width: Int): ImageId =
-    ImageId0x03(value, uniqueId, height, width)
-
-
-/**
- * 图片的标识符. 由图片的数据产生.
- * 对于群, [value] 类似于 `{F61593B5-5B98-1798-3F47-2A91D32ED2FC}.jpg`, 由图片文件 MD5 直接产生.
- * 对于好友, [value] 类似于 `/01ee6426-5ff1-4cf0-8278-e8634d2909ef`, 由服务器返回.
  *
- * @see ExternalImage.groupImageId 群图片的 [ImageId] 获取
- * @see FriendImagePacket 好友图片的 [ImageId] 获取
+ * 最推荐的存储方式是存储图片原文件, 每次发送图片时都使用文件上传.
+ * 在上传时服务器会根据其缓存情况回复已有的图片 ID 或要求客户端上传. 详见 [Contact.uploadImage]
+ *
+ *
+ * ### [toString] 和 [contentToString]
+ * - [toString] 固定返回 `[mirai:image:<ID>]` 格式字符串, 其中 `<ID>` 代表 [imageId].
+ * - [contentToString] 固定返回 "\[图片]"
+ *
+ * ### 上传和发送图片
+ * @see Contact.uploadImage 上传 [图片文件][ExternalImage] 并得到 [Image] 消息
+ * @see Contact.sendImage 上传 [图片文件][ExternalImage] 并发送返回的 [Image] 作为一条消息
+ * @see Image.sendTo 上传图片并得到 [Image] 消息
+ *
+ * ### 下载图片
+ * @see Image.queryUrl 扩展函数. 查询图片下载链接
+ * @see Bot.queryImageUrl 查询图片下载链接 (Java 使用)
+ *
+ * 查看平台 `actual` 定义以获取上传方式扩展.
+ *
+ * ## mirai 码支持
+ * 格式: &#91;mirai:image:*[Image.imageId]*&#93;
+ *
+ * @see FlashImage 闪照
+ * @see Image.flash 转换普通图片为闪照
  */
-interface ImageId {
-    val value: String
+expect interface Image : Message, MessageContent, CodableMessage {
+    companion object Key : Message.Key<Image> {
+        override val typeName: String
+    }
+
+    /**
+     * 图片的 id.
+     *
+     * 图片 id 不一定会长时间保存, 也可能在将来改变格式, 因此不建议使用 id 发送图片.
+     *
+     * ### 格式
+     * 群图片:
+     * - [GROUP_IMAGE_ID_REGEX], 示例: `{01E9451B-70ED-EAE3-B37C-101F1EEBF5B5}.mirai` (后缀一定为 `".mirai"`)
+     *
+     * 好友图片:
+     * - [FRIEND_IMAGE_ID_REGEX_1], 示例: `/f8f1ab55-bf8e-4236-b55e-955848d7069f`
+     * - [FRIEND_IMAGE_ID_REGEX_2], 示例: `/000000000-3814297509-BFB7027B9354B8F899A062061D74E206`
+     *
+     * @see Image 使用 id 构造图片
+     * @see md5 得到图片文件 MD5
+     */
+    val imageId: String
+
+    /* 实现:
+    final override fun toString(): String = _stringValue!!
+
+    final override fun contentToString(): String = "[图片]"
+    */
+
+    @Deprecated(
+        """
+        不要自行实现 Image, 它必须由协议模块实现, 否则会无法发送也无法解析.
+    """, level = DeprecationLevel.HIDDEN
+    )
+    @Suppress("PropertyName")
+    @get:JvmSynthetic
+    internal val DoNotImplementThisClass: Nothing?
 }
 
-fun ImageId.checkLength() = check(value.length == 37 || value.length == 42) { "Illegal ImageId length" }
-fun ImageId.requireLength() = require(value.length == 37 || value.length == 42) { "Illegal ImageId length" }
+/**
+ * 计算图片的 md5 校验值.
+ *
+ * 在 Java 使用: `MessageUtils.calculateImageMd5(image)`
+ */
+@get:JvmName("calculateImageMd5")
+val Image.md5: ByteArray
+    get() = calculateImageMd5ByImageId(imageId)
 
-@Suppress("NOTHING_TO_INLINE")
-inline fun ImageId.image(): Image =
-    Image(this)
 
-suspend inline fun ImageId.sendTo(contact: Contact) = contact.sendMessage(this.image())
+/**
+ * 好友图片
+ *
+ * [imageId] 形如 `/f8f1ab55-bf8e-4236-b55e-955848d7069f` (37 长度)  或 `/000000000-3814297509-BFB7027B9354B8F899A062061D74E206` (54 长度)
+ */
+// NotOnlineImage
+abstract class FriendImage internal constructor() : AbstractImage() { // change to sealed in the future.
+    companion object Key : Message.Key<FriendImage> {
+        override val typeName: String get() = "FriendImage"
+    }
+}
+
+/**
+ * 群图片.
+ *
+ * @property imageId 形如 `{01E9451B-70ED-EAE3-B37C-101F1EEBF5B5}.mirai` (后缀一定为 `".mirai"`)
+ * @see Image 查看更多说明
+ */
+// CustomFace
+abstract class GroupImage internal constructor() : AbstractImage() { // change to sealed in the future.
+    companion object Key : Message.Key<GroupImage> {
+        override val typeName: String get() = "GroupImage"
+    }
+}
+
+/**
+ * 好友图片 ID 正则表达式
+ *
+ * `/f8f1ab55-bf8e-4236-b55e-955848d7069f`
+ * @see FRIEND_IMAGE_ID_REGEX_2
+ */
+// Java: MessageUtils.FRIEND_IMAGE_ID_REGEX_1
+val FRIEND_IMAGE_ID_REGEX_1 = Regex("""/[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}""")
+
+/**
+ * 好友图片 ID 正则表达式 2
+ *
+ * `/000000000-3814297509-BFB7027B9354B8F899A062061D74E206`
+ * @see FRIEND_IMAGE_ID_REGEX_1
+ */
+// Java: MessageUtils.FRIEND_IMAGE_ID_REGEX_2
+val FRIEND_IMAGE_ID_REGEX_2 = Regex("""/[0-9]*-[0-9]*-[0-9a-fA-F]{32}""")
+
+/**
+ * 群图片 ID 正则表达式
+ *
+ * `{01E9451B-70ED-EAE3-B37C-101F1EEBF5B5}.mirai`
+ */
+@Suppress("RegExpRedundantEscape") // This is required on Android
+// Java: MessageUtils.GROUP_IMAGE_ID_REGEX
+val GROUP_IMAGE_ID_REGEX = Regex("""\{[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\}\.mirai""")
+
+/**
+ * 通过 [Image.imageId] 构造一个 [Image] 以便发送.
+ * 这个图片必须是服务器已经存在的图片.
+ * 图片 id 不一定会长时间保存, 因此不建议使用 id 发送图片.
+ *
+ * 请查看 `ExternalImageJvm` 获取更多创建 [Image] 的方法
+ *
+ * @see Image 获取更多说明
+ * @see Image.imageId 获取更多说明
+ */
+@Suppress("FunctionName", "DEPRECATION")
+@JsName("newImage")
+@JvmName("newImage")
+fun Image(imageId: String): OfflineImage = when {
+    imageId matches FRIEND_IMAGE_ID_REGEX_1 -> OfflineFriendImage(imageId)
+    imageId matches FRIEND_IMAGE_ID_REGEX_2 -> OfflineFriendImage(imageId)
+    imageId matches GROUP_IMAGE_ID_REGEX -> OfflineGroupImage(imageId)
+    else -> throw IllegalArgumentException("Illegal imageId: $imageId. $ILLEGAL_IMAGE_ID_EXCEPTION_MESSAGE")
+}
+
+/**
+ * 查询原图下载链接.
+ *
+ * - 当图片为从服务器接收的消息中的图片时, 可以直接获取下载链接, 本函数不会挂起协程.
+ * - 其他情况下协程可能会挂起并向服务器查询下载链接, 或不挂起并拼接一个链接.
+ *
+ * @return 原图 HTTP 下载链接 (非 HTTPS)
+ * @throws IllegalStateException 当无任何 [Bot] 在线时抛出 (因为无法获取相关协议)
+ */
+@JvmSynthetic
+suspend fun Image.queryUrl(): String {
+    @Suppress("DEPRECATION")
+    return when (this) {
+        is ConstOriginUrlAware -> this.originUrl
+        is DeferredOriginUrlAware -> this.getUrl(firstOnlineBotInstance)
+        is SuspendDeferredOriginUrlAware -> this.getUrl(firstOnlineBotInstance)
+        else -> error("Internal error: unsupported Image class: ${this::class}")
+    }
+}
