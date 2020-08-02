@@ -82,7 +82,6 @@ abstract class Bot internal constructor(
         /**
          * 复制一份此时的 [Bot] 实例列表.
          */
-        @MiraiExperimentalAPI
         @SinceMirai("1.1.0")
         @JvmStatic
         val botInstancesSequence: Sequence<Bot>
@@ -292,10 +291,12 @@ abstract class Bot internal constructor(
     @Deprecated(
         "use member function.",
         replaceWith = ReplaceWith("event.reject(blackList)"),
-        level = DeprecationLevel.ERROR
+        level = DeprecationLevel.HIDDEN
     )
-    @JvmSynthetic
     abstract suspend fun rejectMemberJoinRequest(event: MemberJoinRequestEvent, blackList: Boolean = false)
+
+    @JvmSynthetic
+    abstract suspend fun rejectMemberJoinRequest(event: MemberJoinRequestEvent, blackList: Boolean = false, message: String = "")
 
     /**
      * 忽略加群验证（需管理员权限）
